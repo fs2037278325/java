@@ -46,7 +46,13 @@ public class GameController {
     })
     public ApiResult list(@PathVariable int status,@PathVariable int curpage,@PathVariable int limit) {
         //TODO
-        return null;
+        Page<CardGame> page = new Page<>(curpage, limit);
+        QueryWrapper<CardGame> queryWrapper = new QueryWrapper<>();
+        if (status != -1) {
+            queryWrapper.eq("status", status);
+        }
+        page = gameService.page(page, queryWrapper);
+        return new ApiResult<>(1, "获取成功", new PageBean<>(page));
     }
 
     @GetMapping("/info/{gameid}")
@@ -56,7 +62,11 @@ public class GameController {
     })
     public ApiResult<CardGame> info(@PathVariable int gameid) {
         //TODO
-        return null;
+        CardGame game = gameService.getById(gameid);
+        if (game == null) {
+            return new ApiResult<>(0, "活动不存在", null);
+        }
+        return new ApiResult<>(1, "查询成功", game);
     }
 
     @GetMapping("/products/{gameid}")
@@ -66,7 +76,8 @@ public class GameController {
     })
     public ApiResult<List<CardProductDto>> products(@PathVariable int gameid) {
         //TODO
-        return null;
+        List<CardProductDto> byGameId = loadService.getByGameId(gameid);
+        return new ApiResult<>(1,"成功",byGameId);
     }
 
     @GetMapping("/hit/{gameid}/{curpage}/{limit}")
@@ -78,7 +89,11 @@ public class GameController {
     })
     public ApiResult<PageBean<ViewCardUserHit>> hit(@PathVariable int gameid,@PathVariable int curpage,@PathVariable int limit) {
         //TODO
-        return null;
+        Page<ViewCardUserHit> page = new Page<>(curpage, limit);
+        QueryWrapper<ViewCardUserHit> queryWrapper = new QueryWrapper<>();
+        queryWrapper.lambda().eq(ViewCardUserHit::getGameid,gameid);
+        page = hitService.page(page, queryWrapper);
+        return new ApiResult<>(1, "获取成功", new PageBean<>(page));
     }
 
 
