@@ -54,6 +54,34 @@ public class ActController {
     })
     public ApiResult info(@PathVariable int gameid){
         //TODO
-        return null;
+        Map<String,Object> cacheInfo = new HashMap<>();
+        //获取活动基本信息
+        CardGame game = (CardGame) redisUtil.get(RedisKeys.INFO + gameid);
+        cacheInfo.put("gameInfo",game);
+        //从缓存中获取奖品相关的令牌桶
+        String tokensKey = RedisKeys.TOKENS + gameid;
+        List<Object> tokenStrings = redisUtil.lrange(tokensKey,0,-1);
+        List<Long> tokens = new ArrayList<>();
+        for (Object tokenString : tokenStrings){
+            tokens.add((Long) tokenString);
+        }
+        cacheInfo.put("tokens",tokens);
+        //将时间戳转换为日期类型
+        SimpleDateFormat dataFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        Map<Date,CardProduct> productDataMap = new HashMap<>();
+        for (Long token : tokens){
+            CardProduct product = (CardProduct) redisUtil.get(RedisKeys.TOKEN + gameid + "_" + token);
+            if (product != null){
+                Date tokenData = new Date(token/1000);
+                productDataMap.put(tokenData,product);
+            }
+        }
+        cacheInfo.put("productDateMap",productDataMap);
+        //获取活动策略信息
+        Map<Object,Object> maxGoals = redisUtil.hmget(RedisKeys.MAXGOAL + gameid);
+        Map<Object,Object> maxEnters = redisUtil.hmget(RedisKeys.MAXENTER + gameid);
+        cacheInfo.put("maxGoals",maxGoals);
+        cacheInfo.put("maxEnters",maxEnters);
+        return new ApiResult(1,"成功",cacheInfo);
     }
 }
