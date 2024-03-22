@@ -56,7 +56,7 @@ public class ActController {
         //TODO
         Map<String,Object> cacheInfo = new HashMap<>();
         //获取活动基本信息
-        CardGame game = (CardGame) redisUtil.get(RedisKeys.INFO + gameid);
+        CardGame game =  (CardGame) redisUtil.get(RedisKeys.INFO + gameid);
         cacheInfo.put("gameInfo",game);
         //从缓存中获取奖品相关的令牌桶
         String tokensKey = RedisKeys.TOKENS + gameid;

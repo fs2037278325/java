@@ -40,6 +40,7 @@ public class GameTask {
         System.out.printf("scheduled!"+new Date());
         //TODO
         //1.查询未来1分钟内要开始的活动那个
+        //1.查询未来1分钟内要开始的活动那个
         Date now = new Date();
         List<CardGame> games = gameService.list(new QueryWrapper<CardGame>()
                 .ge("startTime", now)
@@ -48,10 +49,10 @@ public class GameTask {
             Date endtime = game.getEndtime();
             long validDuration = endtime.getTime()-now.getTime();//活动剩余有效时长
             //2.缓存活动基本信息
-            redisUtil.set(RedisKeys.INFO + game.getId(),-1);
+            redisUtil.set(RedisKeys.INFO + game.getId(),game,-1);
             //3.查询活动相关的奖品列表及数量
             List<CardGameProduct> products = gameProductService.list(new QueryWrapper<CardGameProduct>()
-                    .eq("gameId", game.getId()));
+                    .eq("gameid", game.getId()));
             List<Long> tokenList = generateTokens(products.size());//生成令牌列表
             //4.缓存奖品相关的令牌桶
             redisUtil.rightPushAll(RedisKeys.TOKENS + game.getId(),tokenList);
