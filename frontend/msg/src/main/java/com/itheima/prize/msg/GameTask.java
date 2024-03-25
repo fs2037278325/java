@@ -1,5 +1,6 @@
 package com.itheima.prize.msg;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.itheima.prize.commons.config.RedisKeys;
 import com.itheima.prize.commons.db.entity.*;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 /**
@@ -37,56 +39,76 @@ public class GameTask {
 
     @Scheduled(cron = "0 * * * * ?")
     public void execute() {
-        System.out.printf("scheduled!"+new Date());
         //TODO
-        //1.查询未来1分钟内要开始的活动那个
-        //1.查询未来1分钟内要开始的活动那个
+        System.out.println("scheduled!"+new Date());
+
+        //将当前时间加一分钟
         Date now = new Date();
-        List<CardGame> games = gameService.list(new QueryWrapper<CardGame>()
-                .ge("startTime", now)
-                .le("startTime", DateUtils.addMinutes(now, 1)));
-        for (CardGame game : games){
-            Date endtime = game.getEndtime();
-            long validDuration = endtime.getTime()-now.getTime();//活动剩余有效时长
-            //2.缓存活动基本信息
-            redisUtil.set(RedisKeys.INFO + game.getId(),game,-1);
-            //3.查询活动相关的奖品列表及数量
-            List<CardGameProduct> products = gameProductService.list(new QueryWrapper<CardGameProduct>()
-                    .eq("gameid", game.getId()));
-            List<Long> tokenList = generateTokens(products.size());//生成令牌列表
-            //4.缓存奖品相关的令牌桶
-            redisUtil.rightPushAll(RedisKeys.TOKENS + game.getId(),tokenList);
-            redisUtil.expire(RedisKeys.TOKENS + game.getId(),validDuration);
-            //5.缓存奖品映射信息
-            List<CardProductDto> cardProductDtos = gameLoadService.getByGameId(game.getId());
-            for(int i=0;i<products.size();i++){
-                Long token = tokenList.get(i);//获取唯一的令牌
-                CardProductDto cardProductDto = cardProductDtos.get(i);
-                redisUtil.set(RedisKeys.TOKENS + game.getId() + "_" + token,cardProductDto, validDuration);
+        Date newDate = DateUtils.addMinutes(now,1);
+
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+        LambdaQueryWrapper<CardGame> lqw = new LambdaQueryWrapper<>();
+        lqw.ge(CardGame::getStarttime,dateFormat.format(now)).lt(CardGame::getStarttime,dateFormat.format(newDate));
+        List<CardGame> gameList = gameService.list(lqw);
+
+        //查询规则
+        List<CardGameRules> ruleList = gameRulesService.list();
+        Map<Integer,List<CardGameRules>> map = new HashMap<>();
+        //放入map方便查询
+        for (CardGameRules rule : ruleList){
+            List list = map.get(rule.getGameid());
+            if (list == null){
+                list = new ArrayList();
             }
-            //查询活动相关的活动策略并放进Redis
-            List<CardGameRules> rulesList = gameRulesService.list(new QueryWrapper<CardGameRules>().eq("gameid",
-                    game.getId()));
-            for (CardGameRules rule : rulesList){
-                redisUtil.hset(RedisKeys.MAXGOAL + game.getId(),String.valueOf(rule.getUserlevel()),rule.
-                        getGoalTimes(),validDuration);
-                redisUtil.hset(RedisKeys.MAXENTER + game.getId(),String.valueOf(rule.getUserlevel()),rule.
-                        getEnterTimes(),validDuration);
+            list.add(rule);
+            map.put(rule.getGameid(),list);
+        }
+
+        for (CardGame game : gameList){
+            if (game.getType() == 1){
+                //缓存活动信息
+                redisUtil.set(RedisKeys.INFO + game.getId(),game,-1);
+
+                //缓存活动策略信息
+                List<CardGameRules> rulesList = map.get(game.getId());
+                for (CardGameRules r : rulesList){
+                    redisUtil.hset(RedisKeys.MAXGOAL + game.getId(), r.getUserlevel()+ "",r.getGoalTimes());
+                    redisUtil.hset(RedisKeys.MAXENTER + game.getId(), r.getUserlevel() + "",r.getEnterTimes());
+                }
+
+                //缓存令牌桶
+                List<CardProductDto> productList = gameLoadService.getByGameId(game.getId());
+                long sum = 0;
+                for (CardProductDto item : productList){
+                    sum += item.getAmount();
+                }
+                List<Long> tokenList = generateToken(sum,game.getStarttime().getTime(),game.getEndtime().getTime());
+                List<Map.Entry<Long, CardProductDto>> pairList = new ArrayList<>();
+                int idx = 0;
+                long duration = game.getEndtime().getTime() - game.getStarttime().getTime();
+                for (CardProductDto item : productList){
+                    for (Integer j=0;j<item.getAmount();j++){
+                        pairList.add(new AbstractMap.SimpleEntry<>(tokenList.get(idx),item));
+                        redisUtil.set(RedisKeys.TOKEN + game.getId() + "_" + tokenList.get(idx),item,duration/1000);
+                        idx++;
+                    }
+                }
+                tokenList.sort(Comparator.comparing(Long::valueOf));
+                redisUtil.rightPushAll(RedisKeys.TOKENS + game.getId(), tokenList);
             }
         }
-        log.info("Scheduled task completed:"+new Date());
     }
 
-    private List<Long> generateTokens(int size) {
-        List<Long> tokenList = new ArrayList<>();
-        long start = System.currentTimeMillis();
-        long end = start+60000;//1分钟后的时间戳
-        for (int i = 0;i<size;i++){
-            long duration = end -start;
-            long rnd = start + new Random().nextInt(999);
+    public static List<Long> generateToken(long length,long start, long end) {
+        long duration = end - start;
+        List<Long> list = new ArrayList<>();
+        for (long i = 0;i < length; i++){
+            //活动持续时间(ms)
+            long rnd = start + new Random().nextInt((int) duration);
+            //为什么乘1000，再额外加一个随机数呢？ - 防止时间段奖品多时重复
             long token = rnd * 1000 + new Random().nextInt(999);
-            tokenList.add(token);
+            list.add(token);
         }
-        return tokenList;
+        return list;
     }
 }
